@@ -15,9 +15,9 @@ venv/
 env/
 sv-venv/
 
-# Local only
-uploads/
-models/
+# Local only — only ignore root-level models folder (AI weights), NOT app/models
+/models/
+/uploads/
 *.pt
 *.pth
 *.ogg
