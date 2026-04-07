@@ -1,4 +1,5 @@
 from flask import Flask, redirect, url_for
+from flask_cors import CORS
 from app.models.database import db
 from config import Config
 from flask_limiter import Limiter
@@ -9,6 +10,9 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[])
 def create_app():
     app = Flask(__name__, template_folder='templates', static_folder='static')
     app.config.from_object(Config)
+
+    # Allow requests from any origin (Android app, local Flask, browsers)
+    CORS(app, supports_credentials=True, origins='*')
 
     db.init_app(app)
     limiter.init_app(app)
