@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Cameras — ShieldVision Pro{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Camera Management</div>
+        <div class="page-subtitle">Add, configure and assign AI models to cameras</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">+ Add Camera</button>
+</div>
+
+<div class="camera-grid" id="camera-grid">
+{% for cam in cameras %}
+<div class="card camera-card" id="cam-{{ cam.id }}">
+    <div class="camera-thumb">
+        <div class="offline-overlay">
+            <span class="icon">📷</span>
+            <span>{{ cam.name }}</span>
+        </div>
+        <div class="cam-status-dot {{ 'online' if cam.is_active else 'offline' }}"></div>
+    </div>
+    <div class="camera-info">
+        <div class="camera-name">{{ cam.name }}</div>
+        <div class="camera-location">📍 {{ cam.location or 'No location set' }}</div>
+        <div class="camera-models">
+            {% for m in cam.model_mappings %}
+            <span class="badge badge-{{ 'info' if m.model_type=='intrusion' else ('warning' if m.model_type=='fire' else 'danger') }}">
+                {{ m.model_type }}
+            </span>
+            {% endfor %}
+        </div>
+        <div class="camera-actions">
+            <a href="/admin/camera/{{ cam.id }}" class="btn btn-primary btn-sm">▶ View</a>
+            <button class="btn btn-outline btn-sm" onclick="openEditModal({{ cam.id }}, '{{ cam.name }}', '{{ cam.rtsp_url }}', '{{ cam.location }}', {{ cam.model_mappings|map(attribute='model_type')|list|tojson }})">Edit</button>
+            <button class="btn btn-outline btn-sm" onclick="openAssignModal({{ cam.id }}, '{{ cam.name }}')">Assign Users</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteCamera({{ cam.id }})">Delete</button>
+        </div>
+    </div>
+</div>
+{% else %}
+<div style="grid-column:1/-1;text-align:center;color:var(--text-secondary);padding:3rem;">No cameras added yet.</div>
+{% endfor %}
+</div>
+
+<!-- Add/Edit Camera Modal -->
+<div class="modal-overlay" id="cam-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title" id="modal-title">Add Camera</span>
+            <button class="modal-close" onclick="closeModal('cam-modal')">✕</button>
+        </div>
+        <input type="hidden" id="edit-cam-id">
+        <div class="form-group">
+            <label class="form-label">Camera Name</label>
+            <input type="text" id="cam-name" class="form-control" placeholder="e.g. Entrance, Hall A">
+        </div>
+        <div class="form-group">
+            <label class="form-label">RTSP URL / Source</label>
+            <input type="text" id="cam-rtsp" class="form-control" placeholder="rtsp://... or rtmp://... or https://youtube.com/watch?v=... or 0 for webcam">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Location</label>
+            <input type="text" id="cam-location" class="form-control" placeholder="e.g. Building A, Floor 2">
+        </div>
+        <div class="form-group">
+            <label class="form-label">AI Models</label>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                <label class="checkbox-item"><input type="checkbox" value="intrusion" class="model-check"> 🛡️ Intrusion</label>
+                <label class="checkbox-item"><input type="checkbox" value="fire" class="model-check"> 🔥 Fire</label>
+                <label class="checkbox-item"><input type="checkbox" value="violence" class="model-check"> 🥊 Violence</label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('cam-modal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveCamera()">Save Camera</button>
+        </div>
+    </div>
+</div>
+
+<!-- Assign Users Modal -->
+<div class="modal-overlay" id="assign-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">Assign Users to <span id="assign-cam-name"></span></span>
+            <button class="modal-close" onclick="closeModal('assign-modal')">✕</button>
+        </div>
+        <input type="hidden" id="assign-cam-id">
+        <div class="form-group">
+            <label class="form-label">Select Users</label>
+            <div class="checkbox-list" id="user-checklist">
+                {% for u in users %}
+                <label class="checkbox-item">
+                    <input type="checkbox" class="user-check" value="{{ u.id }}"> {{ u.username }} ({{ u.email }})
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('assign-modal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveAssignment()">Save Assignment</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openAddModal() {
+    document.getElementById('modal-title').textContent = 'Add Camera';
+    document.getElementById('edit-cam-id').value = '';
+    document.getElementById('cam-name').value = '';
+    document.getElementById('cam-rtsp').value = '';
+    document.getElementById('cam-location').value = '';
+    document.querySelectorAll('.model-check').forEach(c => c.checked = false);
+    document.getElementById('cam-modal').classList.add('open');
+}
+function openEditModal(id, name, rtsp, location, models) {
+    document.getElementById('modal-title').textContent = 'Edit Camera';
+    document.getElementById('edit-cam-id').value = id;
+    document.getElementById('cam-name').value = name;
+    document.getElementById('cam-rtsp').value = rtsp;
+    document.getElementById('cam-location').value = location;
+    document.querySelectorAll('.model-check').forEach(c => c.checked = models.includes(c.value));
+    document.getElementById('cam-modal').classList.add('open');
+}
+async function openAssignModal(camId, camName) {
+    document.getElementById('assign-cam-id').value = camId;
+    document.getElementById('assign-cam-name').textContent = camName;
+    const assigned = await api(`/api/cameras/${camId}/users`);
+    // API returns [{user_id, username, ...}] — extract IDs
+    const assignedIds = assigned.map(u => u.user_id);
+    document.querySelectorAll('.user-check').forEach(c => c.checked = assignedIds.includes(parseInt(c.value)));
+    document.getElementById('assign-modal').classList.add('open');
+}
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+async function saveCamera() {
+    const id = document.getElementById('edit-cam-id').value;
+    const models = [...document.querySelectorAll('.model-check:checked')].map(c => c.value);
+    const body = {
+        name: document.getElementById('cam-name').value.trim(),
+        rtsp_url: document.getElementById('cam-rtsp').value.trim(),
+        location: document.getElementById('cam-location').value.trim(),
+        models
+    };
+    if (!body.name || !body.rtsp_url) { toast('Name and RTSP URL required', 'error'); return; }
+    try {
+        if (id) {
+            await api(`/api/cameras/${id}`, {method:'PUT', body:JSON.stringify(body)});
+            toast('Camera updated', 'success');
+        } else {
+            await api('/api/cameras', {method:'POST', body:JSON.stringify(body)});
+            toast('Camera added', 'success');
+        }
+        closeModal('cam-modal');
+        location.reload();
+    } catch(e) { toast(e.message, 'error'); }
+}
+async function deleteCamera(id) {
+    if (!confirm('Delete this camera and all its data?')) return;
+    try {
+        await api(`/api/cameras/${id}`, {method:'DELETE'});
+        document.getElementById(`cam-${id}`).remove();
+        toast('Camera deleted', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+async function saveAssignment() {
+    const camId = document.getElementById('assign-cam-id').value;
+    const userIds = [...document.querySelectorAll('.user-check:checked')].map(c => parseInt(c.value));
+    try {
+        await api(`/api/cameras/${camId}/users`, {method:'PUT', body:JSON.stringify({user_ids:userIds})});
+        toast('Users assigned successfully', 'success');
+        closeModal('assign-modal');
+    } catch(e) { toast(e.message, 'error'); }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}My Dashboard — ShieldVision Pro{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">My Surveillance</div>
+        <div class="page-subtitle">Cameras assigned to you</div>
+    </div>
+</div>
+
+<!-- Camera Grid -->
+<div class="camera-grid" style="margin-bottom:2rem;">
+{% for cam in cameras %}
+<div class="card camera-card">
+    <div class="camera-thumb">
+        <div class="offline-overlay">
+            <span class="icon">📷</span>
+            <span>{{ cam.name }}</span>
+        </div>
+        <div class="cam-status-dot {{ 'online' if cam.is_active else 'offline' }}"></div>
+    </div>
+    <div class="camera-info">
+        <div class="camera-name">{{ cam.name }}</div>
+        <div class="camera-location">📍 {{ cam.location or 'No location' }}</div>
+        <div class="camera-models">
+            {% for m in cam.model_mappings %}
+            <span class="badge badge-{{ 'info' if m.model_type=='intrusion' else ('warning' if m.model_type=='fire' else 'danger') }}">
+                {{ m.model_type }}
+            </span>
+            {% endfor %}
+        </div>
+        <div class="camera-actions">
+            <a href="/user/camera/{{ cam.id }}" class="btn btn-primary btn-sm">▶ View Live</a>
+        </div>
+    </div>
+</div>
+{% else %}
+<div style="grid-column:1/-1;text-align:center;color:var(--text-secondary);padding:3rem;">
+    No cameras assigned to you yet. Contact your administrator.
+</div>
+{% endfor %}
+</div>
+
+<!-- Global Alert Dashboard -->
+<div id="alerts" class="card">
+    <div class="card-header">
+        <span class="card-title">🚨 My Alert Dashboard</span>
+        <span id="live-badge" class="badge badge-success">LIVE</span>
+    </div>
+    <div class="card-body" style="padding:0;">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Camera</th>
+                        <th>Alert Type</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody id="alerts-tbody">
+                {% if recent_alerts %}
+                    {% for a in recent_alerts %}
+                    <tr>
+                        <td style="font-size:0.8rem;color:var(--text-secondary)">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td><strong>{{ a.camera.name }}</strong></td>
+                        <td><span class="badge badge-{{ 'info' if a.alert_type=='intrusion' else ('warning' if a.alert_type=='fire' else 'danger') }}">{{ a.alert_type.upper() }}</span></td>
+                        <td style="color:var(--accent-lime)">{{ "%.1f"|format(a.confidence * 100) ~ '%' if a.confidence else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr><td colspan="4" style="text-align:center;padding:2rem;color:var(--text-secondary);">No alerts yet</td></tr>
+                {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const typeColors = {intrusion:'badge-info', fire:'badge-warning', violence:'badge-danger'};
+const es = new EventSource('/api/events');
+es.onmessage = e => {
+    if (!e.data.trim()) return;
+    try {
+        const d = JSON.parse(e.data);
+        if (d.type !== 'ALERT') return;
+        const tbody = document.getElementById('alerts-tbody');
+        const empty = tbody.querySelector('td[colspan]');
+        if (empty) empty.closest('tr').remove();
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="font-size:0.8rem;color:var(--text-secondary)">${new Date(d.timestamp).toLocaleString()}</td>
+            <td><strong>${d.camera_name}</strong></td>
+            <td><span class="badge ${typeColors[d.alert_type]||'badge-info'}">${d.alert_type.toUpperCase()}</span></td>
+            <td style="color:var(--accent-lime)">${d.confidence ? (d.confidence*100).toFixed(1)+'%' : '—'}</td>
+        `;
+        tbody.prepend(tr);
+        while(tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
+    } catch(err) {}
+};
+es.onerror = () => {
+    document.getElementById('live-badge').textContent = 'OFFLINE';
+    document.getElementById('live-badge').className = 'badge badge-danger';
+};
+</script>
+{% endblock %}

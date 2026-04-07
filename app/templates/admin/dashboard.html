@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — ShieldVision Pro{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Command Center</div>
+        <div class="page-subtitle">System overview and recent activity</div>
+    </div>
+</div>
+
+<div class="stats-row">
+    <div class="card stat-card">
+        <div class="value">{{ total_cameras }}</div>
+        <div class="label">📷 Cameras</div>
+    </div>
+    <div class="card stat-card">
+        <div class="value">{{ total_users }}</div>
+        <div class="label">👥 Users</div>
+    </div>
+    <div class="card stat-card">
+        <div class="value" id="active-streams">0</div>
+        <div class="label">🟢 Live Streams</div>
+    </div>
+    <div class="card stat-card">
+        <div class="value">{{ total_alerts }}</div>
+        <div class="label">🚨 Total Alerts</div>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;">
+    <!-- Recent Alerts -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">🚨 Recent Alerts</span>
+            <a href="/admin/alerts" class="btn btn-ghost btn-sm">View All</a>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <div class="alert-log" style="max-height:400px;padding:1rem;">
+                {% if recent_alerts %}
+                    {% for a in recent_alerts %}
+                    <div class="alert-item {{ a.alert_type }}">
+                        <div class="alert-item-time">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+                        <div class="alert-item-type alert-{{ a.alert_type }}">{{ a.alert_type.upper() }}</div>
+                        <div class="alert-item-cam">📷 {{ a.camera.name }}</div>
+                        {% if a.confidence %}<div class="alert-item-conf">Confidence: {{ "%.1f"|format(a.confidence * 100) }}%</div>{% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="text-align:center;color:var(--text-secondary);padding:2rem;font-size:0.85rem;">No alerts yet</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Alert Feed -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">⚡ Live Alert Feed</span>
+            <span class="badge badge-success" id="feed-status">CONNECTED</span>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <div class="alert-log" id="live-alerts" style="max-height:400px;padding:1rem;">
+                <div style="text-align:center;color:var(--text-secondary);padding:2rem;font-size:0.85rem;">Listening for alerts...</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const es = new EventSource('/api/events');
+es.onmessage = e => {
+    if (!e.data.trim()) return;
+    try {
+        const d = JSON.parse(e.data);
+        if (d.type !== 'ALERT') return;
+        const log = document.getElementById('live-alerts');
+        const empty = log.querySelector('[style*="text-align:center"]');
+        if (empty) empty.remove();
+        const item = document.createElement('div');
+        item.className = `alert-item ${d.alert_type}`;
+        item.innerHTML = `
+            <div class="alert-item-time">${new Date(d.timestamp).toLocaleString()}</div>
+            <div class="alert-item-type alert-${d.alert_type}">${d.alert_type.toUpperCase()}</div>
+            <div class="alert-item-cam">📷 ${d.camera_name}</div>
+            ${d.confidence ? `<div class="alert-item-conf">Confidence: ${(d.confidence*100).toFixed(1)}%</div>` : ''}
+        `;
+        log.prepend(item);
+        while(log.children.length > 30) log.removeChild(log.lastChild);
+    } catch(err) {}
+};
+es.onerror = () => {
+    document.getElementById('feed-status').textContent = 'DISCONNECTED';
+    document.getElementById('feed-status').className = 'badge badge-danger';
+};
+</script>
+{% endblock %}

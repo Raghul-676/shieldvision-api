@@ -1,0 +1,22 @@
+# Render deployment requirements — API only, no AI/CV dependencies
+# These are the only packages needed for the REST API backend
+
+flask==3.1.3
+flask-sqlalchemy==3.1.1
+flask-limiter==4.1.1
+werkzeug==3.1.6
+psycopg2-binary==2.9.11
+PyJWT==2.12.1
+python-dotenv==1.2.2
+gunicorn==21.2.0
+sqlalchemy==2.0.49
+greenlet==3.3.2
+itsdangerous==2.2.0
+jinja2==3.1.6
+click==8.3.1
+blinker==1.9.0
+limits==5.8.0
+ordered-set==4.1.0
+packaging==25.0
+Pillow==10.3.0
+requests==2.32.5

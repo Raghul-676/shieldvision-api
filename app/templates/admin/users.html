@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Users — ShieldVision Pro{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">User Management</div>
+        <div class="page-subtitle">Create users individually or bulk import via CSV</div>
+    </div>
+    <div style="display:flex;gap:0.75rem;">
+        <button class="btn btn-ghost" onclick="document.getElementById('csv-input').click()">📂 Import CSV</button>
+        <input type="file" id="csv-input" accept=".csv" style="display:none" onchange="importCSV(this)">
+        <button class="btn btn-primary" onclick="openAddModal()">+ Add User</button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body" style="padding:0;">
+        <div class="table-wrap">
+            <table id="users-table">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for u in users %}
+                <tr id="user-row-{{ u.id }}">
+                    <td><strong>{{ u.username }}</strong></td>
+                    <td style="color:var(--text-secondary)">{{ u.email }}</td>
+                    <td>
+                        <span class="badge {{ 'badge-success' if u.is_active else 'badge-danger' }}">
+                            {{ 'Active' if u.is_active else 'Disabled' }}
+                        </span>
+                    </td>
+                    <td style="color:var(--text-secondary);font-size:0.8rem">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <div style="display:flex;gap:0.5rem;">
+                            <button class="btn btn-ghost btn-sm" onclick="toggleUser({{ u.id }}, {{ u.is_active|lower }})">
+                                {{ 'Disable' if u.is_active else 'Enable' }}
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteUser({{ u.id }})">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:2rem;">No users yet</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- CSV Format hint -->
+<div class="card" style="margin-top:1rem;">
+    <div class="card-body">
+        <p style="font-size:0.8rem;color:var(--text-secondary);">
+            📋 <strong style="color:var(--accent-cyan)">CSV Format:</strong>
+            <code style="background:rgba(255,255,255,0.05);padding:2px 8px;border-radius:4px;margin-left:0.5rem;">username,email,password</code>
+        </p>
+    </div>
+</div>
+
+<!-- Add User Modal -->
+<div class="modal-overlay" id="add-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">Add User</span>
+            <button class="modal-close" onclick="closeModal('add-modal')">✕</button>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" id="new-username" class="form-control" placeholder="username">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" id="new-email" class="form-control" placeholder="user@example.com">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="new-password" class="form-control" placeholder="password">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('add-modal')">Cancel</button>
+            <button class="btn btn-primary" onclick="addUser()">Create User</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openAddModal() { document.getElementById('add-modal').classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+async function addUser() {
+    const body = {
+        username: document.getElementById('new-username').value.trim(),
+        email: document.getElementById('new-email').value.trim(),
+        password: document.getElementById('new-password').value
+    };
+    if (!body.username || !body.email || !body.password) { toast('All fields required', 'error'); return; }
+    try {
+        await api('/api/users', {method:'POST', body:JSON.stringify(body)});
+        toast('User created', 'success');
+        closeModal('add-modal');
+        location.reload();
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteUser(id) {
+    if (!confirm('Delete this user?')) return;
+    try {
+        await api(`/api/users/${id}`, {method:'DELETE'});
+        document.getElementById(`user-row-${id}`).remove();
+        toast('User deleted', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleUser(id, isActive) {
+    try {
+        const data = await api(`/api/users/${id}/toggle`, {method:'POST'});
+        toast(`User ${data.is_active ? 'enabled' : 'disabled'}`, 'success');
+        location.reload();
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+async function importCSV(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const res = await fetch('/api/users/bulk', {method:'POST', body:formData});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast(`Created: ${data.created.length}, Skipped: ${data.skipped.length}`, 'success');
+        location.reload();
+    } catch(e) { toast(e.message, 'error'); }
+    input.value = '';
+}
+</script>
+{% endblock %}

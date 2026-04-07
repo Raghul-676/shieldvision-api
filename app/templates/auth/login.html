@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — ShieldVision Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+<div class="login-page">
+    <div class="card login-card">
+        <div class="login-logo">
+            <h1>ShieldVision™</h1>
+            <p>Intelligent Surveillance Platform</p>
+        </div>
+        <div id="error-msg" style="display:none;color:var(--danger);font-size:0.8rem;margin-bottom:1rem;text-align:center;"></div>
+        <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" id="username" class="form-control" placeholder="Enter username" autocomplete="username">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="password" class="form-control" placeholder="Enter password" autocomplete="current-password">
+        </div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;padding:0.75rem;" onclick="doLogin()">
+            Sign In
+        </button>
+        <p style="text-align:center;margin-top:1rem;font-size:0.75rem;color:var(--text-secondary);">
+            Default admin: <code style="color:var(--accent-cyan)">admin / admin123</code>
+        </p>
+    </div>
+</div>
+<script>
+async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const errEl = document.getElementById('error-msg');
+    errEl.style.display = 'none';
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({username, password})
+        });
+        const data = await res.json();
+        if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        location.href = data.redirect;
+    } catch(e) {
+        errEl.textContent = 'Connection error'; errEl.style.display = 'block';
+    }
+}
+document.addEventListener('keydown', e => { if(e.key === 'Enter') doLogin(); });
+</script>
+</body>
+</html>

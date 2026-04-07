@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ShieldVision Pro{% endblock %}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+<div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <h2>ShieldVision™</h2>
+            <span>PRO SURVEILLANCE</span>
+        </div>
+
+        {% if session.get('role') == 'admin' %}
+        <a href="/admin/dashboard" class="nav-link {% if request.path == '/admin/dashboard' %}active{% endif %}">
+            <span class="icon">📊</span> Dashboard
+        </a>
+        <a href="/admin/cameras" class="nav-link {% if request.path == '/admin/cameras' %}active{% endif %}">
+            <span class="icon">📷</span> Cameras
+        </a>
+        <a href="/admin/users" class="nav-link {% if request.path == '/admin/users' %}active{% endif %}">
+            <span class="icon">👥</span> Users
+        </a>
+        <a href="/admin/alerts" class="nav-link {% if request.path == '/admin/alerts' %}active{% endif %}">
+            <span class="icon">🚨</span> Alerts
+        </a>
+        {% else %}
+        <a href="/user/dashboard" class="nav-link {% if request.path == '/user/dashboard' %}active{% endif %}">
+            <span class="icon">🏠</span> My Cameras
+        </a>
+        <a href="/user/dashboard#alerts" class="nav-link">
+            <span class="icon">🚨</span> My Alerts
+        </a>
+        {% endif %}
+
+        <div class="sidebar-footer">
+            <div class="user-badge">
+                <div class="user-avatar">{{ session.get('username', 'U')[0].upper() }}</div>
+                <div class="user-info">
+                    <div class="name">{{ session.get('username', 'User') }}</div>
+                    <div class="role">{{ session.get('role', 'user') }}</div>
+                </div>
+            </div>
+            <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:0.5rem;" onclick="logout()">Sign Out</button>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-area">
+        {% block content %}{% endblock %}
+    </main>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+function logout() {
+    fetch('/api/logout', {method:'POST'}).then(() => location.href = '/login');
+}
+function toast(msg, type='info') {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+}
+async function api(url, opts={}) {
+    const res = await fetch(url, {
+        headers: {'Content-Type':'application/json', ...opts.headers},
+        ...opts
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+}
+</script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Alerts — ShieldVision Pro{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Alert Center</div>
+        <div class="page-subtitle">Filter and review all system alerts</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom:1.25rem;">
+    <div class="card-body">
+        <div class="filters-bar">
+            <div class="form-group">
+                <label class="form-label">Camera</label>
+                <select id="filter-camera" class="form-control" style="width:180px;">
+                    <option value="">All Cameras</option>
+                    {% for c in cameras %}
+                    <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Alert Type</label>
+                <select id="filter-type" class="form-control" style="width:150px;">
+                    <option value="">All Types</option>
+                    <option value="intrusion">Intrusion</option>
+                    <option value="fire">Fire</option>
+                    <option value="violence">Violence</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">From</label>
+                <input type="datetime-local" id="filter-from" class="form-control" style="width:200px;">
+            </div>
+            <div class="form-group">
+                <label class="form-label">To</label>
+                <input type="datetime-local" id="filter-to" class="form-control" style="width:200px;">
+            </div>
+            <button class="btn btn-primary" onclick="loadAlerts()">Apply Filters</button>
+            <button class="btn btn-ghost" onclick="clearFilters()">Clear</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">🚨 Alerts</span>
+        <span id="alert-count" class="badge badge-info">Loading...</span>
+    </div>
+    <div class="card-body" style="padding:0;">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Camera</th>
+                        <th>Alert Type</th>
+                        <th>Confidence</th>
+                        <th>ROI</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="alerts-tbody">
+                    <tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-secondary);">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const typeColors = {intrusion:'badge-info', fire:'badge-warning', violence:'badge-danger'};
+
+async function loadAlerts() {
+    const params = new URLSearchParams();
+    const cam = document.getElementById('filter-camera').value;
+    const type = document.getElementById('filter-type').value;
+    const from = document.getElementById('filter-from').value;
+    const to = document.getElementById('filter-to').value;
+    if (cam) params.set('camera_id', cam);
+    if (type) params.set('alert_type', type);
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    params.set('limit', '200');
+
+    try {
+        const alerts = await api(`/api/alerts?${params}`);
+        document.getElementById('alert-count').textContent = `${alerts.length} alerts`;
+        const tbody = document.getElementById('alerts-tbody');
+        if (!alerts.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-secondary);">No alerts found</td></tr>';
+            return;
+        }
+        tbody.innerHTML = alerts.map(a => `
+            <tr>
+                <td style="font-size:0.8rem;color:var(--text-secondary)">${new Date(a.timestamp).toLocaleString()}</td>
+                <td><strong>${a.camera_name}</strong></td>
+                <td><span class="badge ${typeColors[a.alert_type] || 'badge-info'}">${a.alert_type.toUpperCase()}</span></td>
+                <td style="color:var(--accent-lime)">${a.confidence ? (a.confidence*100).toFixed(1)+'%' : '—'}</td>
+                <td>${a.roi_triggered ? '<span class="badge badge-warning">ROI</span>' : '—'}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="deleteAlert(${a.id}, this)">Delete</button></td>
+            </tr>
+        `).join('');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteAlert(id, btn) {
+    try {
+        await api(`/api/alerts/${id}`, {method:'DELETE'});
+        btn.closest('tr').remove();
+        toast('Alert deleted', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+function clearFilters() {
+    ['filter-camera','filter-type','filter-from','filter-to'].forEach(id => {
+        const el = document.getElementById(id);
+        el.value = '';
+    });
+    loadAlerts();
+}
+
+loadAlerts();
+
+// Live updates
+const es = new EventSource('/api/events');
+es.onmessage = e => {
+    if (!e.data.trim()) return;
+    try {
+        const d = JSON.parse(e.data);
+        if (d.type === 'ALERT') loadAlerts();
+    } catch(err) {}
+};
+</script>
+{% endblock %}

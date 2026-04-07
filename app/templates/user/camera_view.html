@@ -1,0 +1,498 @@
+{% extends "base.html" %}
+{% block title %}{{ camera.name }} — ShieldVision Pro{% endblock %}
+
+{% set has_intrusion = camera.model_mappings | selectattr('model_type','equalto','intrusion') | list | length > 0 %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:1rem;">
+    <div>
+        <div class="page-title">📷 {{ camera.name }}</div>
+        <div class="page-subtitle">📍 {{ camera.location or 'No location' }}</div>
+    </div>
+    <div style="display:flex;gap:0.75rem;align-items:center;">
+        <span id="stream-badge" class="badge badge-danger">OFFLINE</span>
+        <button id="btn-start" class="btn btn-primary" onclick="startStream()">▶ Start Stream</button>
+        <button id="btn-stop"  class="btn btn-danger"  onclick="stopStream()" disabled>⏹ Stop</button>
+        <a href="javascript:history.back()" class="btn btn-ghost">← Back</a>
+    </div>
+</div>
+
+<div class="hud-layout">
+
+    <!-- ── Video Panel ──────────────────────────────────────────────────── -->
+    <div class="hud-video-panel" id="video-panel">
+
+        <!-- Shown before stream starts -->
+        <div id="video-placeholder" class="placeholder-hud">
+            <div class="scan-line"></div>
+            <span style="font-size:3rem;">📷</span>
+            <p style="font-family:'Montserrat',sans-serif;font-weight:700;
+                      color:var(--accent-cyan);letter-spacing:0.15em;">AWAITING STREAM</p>
+            <span style="font-size:0.8rem;">Click "Start Stream" to begin</span>
+        </div>
+
+        <!--
+            video-inner-wrap shrinks to the exact rendered size of the img.
+            Canvas sits on top with pointer-events:none — video plays freely.
+            draw-cursor div captures mouse only when draw mode is active.
+        -->
+        <div class="video-inner-wrap" id="video-wrap" style="display:none;">
+
+            <img id="video-feed" src="" alt="Live Feed">
+
+            <!-- Canvas: always present, transparent, no pointer events -->
+            <canvas id="roi-canvas" class="roi-canvas"></canvas>
+
+            <!-- Cursor layer: only shown + active during draw mode -->
+            <div id="draw-cursor" class="draw-cursor"></div>
+
+            <!-- Banners inside the wrap so they sit over the video -->
+            {% if has_intrusion %}
+            <div id="roi-banner" style="
+                display:none; position:absolute;
+                bottom:10px; left:50%; transform:translateX(-50%);
+                background:rgba(0,0,0,0.85); border:1px solid var(--accent-cyan);
+                border-radius:6px; padding:6px 18px; z-index:30;
+                font-size:0.72rem; font-weight:700; letter-spacing:0.05em;
+                color:var(--accent-cyan); white-space:nowrap;
+                pointer-events:none;
+                animation:pulse-banner 1.5s ease-in-out infinite;">
+                🎯 Click "Draw Zone" to activate intrusion detection
+            </div>
+            {% endif %}
+
+            <div id="det-banner" style="
+                display:none; position:absolute;
+                bottom:10px; left:50%; transform:translateX(-50%);
+                background:rgba(0,0,0,0.85); border:1px solid var(--accent-lime);
+                border-radius:6px; padding:6px 18px; z-index:30;
+                font-size:0.72rem; font-weight:700; letter-spacing:0.05em;
+                color:var(--accent-lime); white-space:nowrap;
+                pointer-events:none;">
+                ✅ DETECTION ACTIVE
+            </div>
+        </div>
+
+        <!-- HUD overlays — always on top, outside the wrap -->
+        <div class="hud-overlay-tl">
+            <div id="status-badge" class="hud-badge">STATUS: IDLE</div>
+        </div>
+        <div class="hud-overlay-tr">
+            <div>CAM_ID: {{ camera.id }}</div>
+            <div id="ts-val">--:--:--</div>
+        </div>
+    </div>
+
+    <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
+    <div class="hud-sidebar-panel">
+
+        <!-- Active models -->
+        <div class="card">
+            <div class="card-header"><span class="card-title">AI Models Active</span></div>
+            <div class="card-body" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                {% for m in camera.model_mappings %}
+                <span class="badge badge-{{ 'info' if m.model_type=='intrusion' else ('warning' if m.model_type=='fire' else 'danger') }}">
+                    {{ '🛡️' if m.model_type=='intrusion' else ('🔥' if m.model_type=='fire' else '🥊') }}
+                    {{ m.model_type }}
+                </span>
+                {% else %}
+                <span style="color:var(--text-secondary);font-size:0.8rem;">No models assigned</span>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Intrusion zone controls -->
+        {% if has_intrusion %}
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">🎯 Intrusion Zone</span>
+                <span id="zone-badge" class="badge badge-danger" style="font-size:0.65rem;">NO ZONE</span>
+            </div>
+            <div class="card-body">
+                <p style="font-size:0.78rem;color:var(--text-secondary);
+                           margin-bottom:0.75rem;line-height:1.7;">
+                    <strong style="color:var(--accent-cyan);">Steps:</strong><br>
+                    1. Start the stream<br>
+                    2. Click <strong>Draw Zone</strong><br>
+                    3. Drag on the video to draw<br>
+                    4. Zone locks — detection starts<br>
+                    5. Click <strong>Clear Zone</strong> to reset
+                </p>
+                <div style="display:flex;gap:0.5rem;">
+                    <button id="btn-draw" class="btn btn-outline btn-sm"
+                            onclick="startDrawMode()" disabled>
+                        ✏️ Draw Zone
+                    </button>
+                    <button id="btn-clear" class="btn btn-ghost btn-sm"
+                            onclick="clearZone()" disabled>
+                        🗑 Clear Zone
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Alerts -->
+        <div class="card" style="flex:1;min-height:0;">
+            <div class="card-header">
+                <span class="card-title">🚨 Alerts</span>
+                <button class="btn btn-ghost btn-sm" onclick="clearLog()">Clear</button>
+            </div>
+            <div class="card-body" style="padding:0.75rem;overflow-y:auto;max-height:340px;">
+                <div id="alert-log">
+                    <p id="no-alerts" style="text-align:center;color:var(--text-secondary);
+                       padding:1.5rem;font-size:0.8rem;">No alerts yet</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<audio id="alarm" src="{{ url_for('static', filename='sounds/alarm.ogg') }}" preload="auto"></audio>
+
+<style>
+@keyframes pulse-banner {
+    0%,100% { opacity:1;  box-shadow:0 0 8px  rgba(0,247,255,0.4); }
+    50%      { opacity:.6; box-shadow:0 0 20px rgba(0,247,255,0.8); }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const CAM_ID        = {{ camera.id }};
+const HAS_INTRUSION = {{ 'true' if has_intrusion else 'false' }};
+
+// ── DOM ────────────────────────────────────────────────────────────────────
+const feed       = document.getElementById('video-feed');
+const wrap       = document.getElementById('video-wrap');
+const panel      = document.getElementById('video-panel');
+const canvas     = document.getElementById('roi-canvas');
+const ctx        = canvas.getContext('2d');
+const cursor     = document.getElementById('draw-cursor');
+const roiBanner  = document.getElementById('roi-banner');
+const detBanner  = document.getElementById('det-banner');
+const zoneBadge  = document.getElementById('zone-badge');
+const btnDraw    = document.getElementById('btn-draw');
+const btnClear   = document.getElementById('btn-clear');
+
+// ── State ──────────────────────────────────────────────────────────────────
+let streaming    = false;
+let drawing      = false;   // true while mouse is held down
+let drawActive   = false;   // true when draw mode is on (button clicked)
+let zoneSet      = false;   // true after zone is confirmed
+let zone         = null;    // [x1,y1,x2,y2] normalised 0-1
+let sx = 0, sy = 0;         // drag start coords
+let _raf         = null;
+let _ro          = null;
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+setInterval(() => {
+    document.getElementById('ts-val').textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+// ── Stream start ───────────────────────────────────────────────────────────
+async function startStream() {
+    try {
+        await api(`/api/cameras/${CAM_ID}/stream/start`, { method: 'POST' });
+    } catch(e) { toast(e.message, 'error'); return; }
+
+    streaming = true;
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').disabled  = false;
+    document.getElementById('stream-badge').textContent = 'LIVE';
+    document.getElementById('stream-badge').className   = 'badge badge-success';
+    document.getElementById('status-badge').textContent = 'STATUS: ONLINE';
+    document.getElementById('status-badge').className   = 'hud-badge';
+    document.getElementById('video-placeholder').style.display = 'none';
+
+    // Show wrap and set src — video starts playing immediately
+    wrap.style.display = 'block';
+    feed.src = `/api/cameras/${CAM_ID}/feed?t=${Date.now()}`;
+
+    // Start SSE immediately — don't wait for video dimensions
+    startSSE();
+
+    // Wait for first frame to have real pixel dimensions
+    _pollDimensions();
+}
+
+// Poll with rAF until the img has real pixel dimensions (MJPEG has no onload)
+function _pollDimensions() {
+    if (_raf) cancelAnimationFrame(_raf);
+    (function check() {
+        if (feed.offsetWidth > 10 && feed.offsetHeight > 10) {
+            _onVideoReady();
+        } else {
+            _raf = requestAnimationFrame(check);
+        }
+    })();
+}
+
+function _onVideoReady() {
+    _raf = null;
+    _fitCanvas();
+
+    // Enable Draw Zone button — do NOT auto-enter draw mode
+    if (HAS_INTRUSION) {
+        if (btnDraw)  btnDraw.disabled  = false;
+        if (btnClear) btnClear.disabled = false;
+        if (!zoneSet && roiBanner) roiBanner.style.display = 'block';
+        if (zoneSet)  { _drawZone(); _showDetActive(); }
+    }
+
+    // Watch for window resize — re-sync canvas pixel buffer
+    if (_ro) _ro.disconnect();
+    _ro = new ResizeObserver(() => {
+        if (!streaming) return;
+        _fitCanvas();
+    });
+    _ro.observe(wrap);
+}
+
+// Size canvas pixel buffer to match the rendered img exactly.
+// Canvas CSS size is already 100%/100% of the wrapper via CSS.
+// We only need to set canvas.width/height (the pixel buffer) once.
+function _fitCanvas() {
+    const w = feed.offsetWidth;
+    const h = feed.offsetHeight;
+    if (w < 1 || h < 1) return;
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width  = w;
+        canvas.height = h;
+        // Redraw zone if already set (canvas.width= clears it)
+        if (zoneSet) _drawZone();
+    }
+}
+
+// ── Stream stop ────────────────────────────────────────────────────────────
+async function stopStream() {
+    if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
+    if (_ro)  { _ro.disconnect(); _ro = null; }
+    _exitDraw();
+
+    try { await api(`/api/cameras/${CAM_ID}/stream/stop`, { method: 'POST' }); } catch(e) {}
+
+    streaming = false;
+    zoneSet   = false;
+    zone      = null;
+
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-stop').disabled  = true;
+    document.getElementById('stream-badge').textContent = 'OFFLINE';
+    document.getElementById('stream-badge').className   = 'badge badge-danger';
+    document.getElementById('status-badge').textContent = 'STATUS: IDLE';
+    document.getElementById('status-badge').className   = 'hud-badge';
+
+    feed.src = '';
+    wrap.style.display = 'none';
+    document.getElementById('video-placeholder').style.display = 'flex';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (roiBanner) roiBanner.style.display = 'none';
+    if (detBanner) detBanner.style.display = 'none';
+    if (zoneBadge) { zoneBadge.textContent = 'NO ZONE'; zoneBadge.className = 'badge badge-danger'; }
+    if (btnDraw)   btnDraw.disabled  = true;
+    if (btnClear)  btnClear.disabled = true;
+}
+
+// ── Draw mode ──────────────────────────────────────────────────────────────
+// Called ONLY by the Draw Zone button
+function startDrawMode() {
+    if (!streaming) { toast('Start stream first', 'error'); return; }
+    if (zoneSet)    { toast('Clear the existing zone first', 'info'); return; }
+
+    drawActive = true;
+
+    // Show cursor layer — it captures mouse events, canvas stays transparent
+    cursor.style.display = 'block';
+
+    // Disable the draw button while in draw mode
+    if (btnDraw) btnDraw.disabled = true;
+
+    toast('Drag on the video to draw the intrusion zone', 'info');
+}
+
+function _exitDraw() {
+    drawActive = false;
+    drawing    = false;
+    cursor.style.display = 'none';
+    if (btnDraw && streaming && !zoneSet) btnDraw.disabled = false;
+}
+
+// ── Clear zone ─────────────────────────────────────────────────────────────
+function clearZone() {
+    zone    = null;
+    zoneSet = false;
+    _exitDraw();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Fire-and-forget — don't block UI
+    fetch(`/api/cameras/${CAM_ID}/roi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_type: 'intrusion', roi: null })
+    }).catch(() => {});
+
+    if (roiBanner) roiBanner.style.display = 'block';
+    if (detBanner) detBanner.style.display = 'none';
+    if (zoneBadge) { zoneBadge.textContent = 'NO ZONE'; zoneBadge.className = 'badge badge-danger'; }
+    if (btnDraw)   btnDraw.disabled = false;
+    toast('Zone cleared — draw a new zone to resume detection', 'info');
+}
+
+// ── Draw zone on canvas ────────────────────────────────────────────────────
+function _drawZone() {
+    if (!zone) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const x1 = zone[0] * canvas.width,  y1 = zone[1] * canvas.height;
+    const x2 = zone[2] * canvas.width,  y2 = zone[3] * canvas.height;
+    // Filled semi-transparent green rectangle
+    ctx.fillStyle   = 'rgba(57,255,20,0.08)';
+    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    // Solid green border
+    ctx.strokeStyle = '#39ff14';
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([]);
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    // Label
+    ctx.fillStyle = '#39ff14';
+    ctx.font      = 'bold 11px monospace';
+    ctx.fillText('INTRUSION ZONE', x1 + 6, y1 + 16);
+}
+
+function _showDetActive() {
+    if (roiBanner) roiBanner.style.display = 'none';
+    if (detBanner) detBanner.style.display = 'block';
+    if (zoneBadge) { zoneBadge.textContent = 'ACTIVE'; zoneBadge.className = 'badge badge-success'; }
+}
+
+// ── Mouse events on the cursor layer ──────────────────────────────────────
+// All mouse events go to #draw-cursor (which is on top) during draw mode.
+// The canvas below just renders — it never receives mouse events.
+
+cursor.addEventListener('mousedown', e => {
+    if (!drawActive) return;
+    e.preventDefault();
+    drawing = true;
+    const r = cursor.getBoundingClientRect();
+    sx = e.clientX - r.left;
+    sy = e.clientY - r.top;
+});
+
+cursor.addEventListener('mousemove', e => {
+    if (!drawing) return;
+    const r  = cursor.getBoundingClientRect();
+    const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    // Live preview while dragging
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#00f7ff';
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.fillStyle   = 'rgba(0,247,255,0.08)';
+    ctx.strokeRect(sx, sy, cx - sx, cy - sy);
+    ctx.fillRect(sx, sy, cx - sx, cy - sy);
+});
+
+cursor.addEventListener('mouseup', e => {
+    if (!drawing) return;
+    drawing = false;
+
+    const r  = cursor.getBoundingClientRect();
+    const ex = e.clientX - r.left, ey = e.clientY - r.top;
+
+    // Ignore tiny accidental clicks
+    if (Math.abs(ex - sx) < 10 || Math.abs(ey - sy) < 10) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        _exitDraw();
+        return;
+    }
+
+    // Normalise to 0-1
+    zone = [
+        Math.min(sx, ex) / canvas.width,
+        Math.min(sy, ey) / canvas.height,
+        Math.max(sx, ex) / canvas.width,
+        Math.max(sy, ey) / canvas.height,
+    ];
+
+    zoneSet = true;
+    ctx.setLineDash([]);
+    _exitDraw();       // hide cursor layer, disable draw mode
+    _drawZone();       // render the confirmed zone on canvas
+    _showDetActive();  // update badge + banner
+
+    // Fire-and-forget — do NOT await, so the video feed is never blocked
+    fetch(`/api/cameras/${CAM_ID}/roi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_type: 'intrusion', roi: zone })
+    }).then(r => {
+        if (r.ok) toast('✅ Zone set — intrusion detection is now active!', 'success');
+        else      toast('Zone drawn but server sync failed', 'error');
+    }).catch(() => toast('Zone drawn but server unreachable', 'error'));
+});
+
+// Escape key cancels draw mode without setting a zone
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && drawActive) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        _exitDraw();
+        toast('Draw mode cancelled', 'info');
+    }
+});
+
+// ── SSE alerts ─────────────────────────────────────────────────────────────
+function startSSE() {
+    const es = new EventSource(`/api/events/camera/${CAM_ID}`);
+    es.onmessage = ev => {
+        if (!ev.data.trim()) return;
+        try {
+            const d = JSON.parse(ev.data);
+            if (d.type !== 'ALERT' || d.camera_id !== CAM_ID) return;
+            _addAlert(d);
+            _flashAlert(d);
+        } catch(_) {}
+    };
+}
+
+function _addAlert(d) {
+    const log = document.getElementById('alert-log');
+    const empty = document.getElementById('no-alerts');
+    if (empty) empty.remove();
+
+    const item = document.createElement('div');
+    item.className = `alert-item ${d.alert_type}`;
+    item.innerHTML = `
+        <div class="alert-item-time">${new Date(d.timestamp).toLocaleTimeString()}</div>
+        <div class="alert-item-type alert-${d.alert_type}">${d.alert_type.toUpperCase()}</div>
+        ${d.confidence
+            ? `<div class="alert-item-conf">Confidence: ${(d.confidence * 100).toFixed(1)}%</div>`
+            : ''}
+    `;
+    log.prepend(item);
+    while (log.children.length > 40) log.removeChild(log.lastChild);
+}
+
+let _alertTimer;
+function _flashAlert(d) {
+    panel.classList.add('alert-active');
+    const badge = document.getElementById('status-badge');
+    badge.textContent = `⚠ ALERT: ${d.alert_type.toUpperCase()}`;
+    badge.className   = 'hud-badge alert';
+    document.getElementById('alarm')?.play().catch(() => {});
+    clearTimeout(_alertTimer);
+    _alertTimer = setTimeout(() => {
+        panel.classList.remove('alert-active');
+        badge.textContent = 'STATUS: ONLINE';
+        badge.className   = 'hud-badge';
+    }, 5000);
+}
+
+function clearLog() {
+    document.getElementById('alert-log').innerHTML =
+        '<p id="no-alerts" style="text-align:center;color:var(--text-secondary);' +
+        'padding:1.5rem;font-size:0.8rem;">No alerts yet</p>';
+}
+</script>
+{% endblock %}
